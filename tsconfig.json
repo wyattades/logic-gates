@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "lib": ["es6", "dom"],
+    "typeRoots": ["./node_modules/@types"],
+    "target": "es5",
+    "jsx": "preserve",
+    "noEmit": false,
+    "allowJs": true,
+    "isolatedModules": true,
+    "incremental": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "tsBuildInfoFile": "tmp/.tsbuildinfo",
+    "baseUrl": ".",
+    "paths": {
+      "*": ["./*", "./node_modules/*"]
+    },
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "esnext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true
+  },
+  "exclude": ["tmp", "node_modules", "public"],
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"]
+}
