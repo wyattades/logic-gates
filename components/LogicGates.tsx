@@ -213,10 +213,10 @@ const InOutLane: React.FC<{
           );
         })}
 
-        <div className="absolute bottom-0 left-0 w-full flex flex-col items-stretch">
+        <div className="absolute bottom-0 left-0 w-full flex flex-col items-stretch p-1 space-y-1">
           <button
             aria-label="add a socket"
-            className="p-2 bg-white hover:bg-gray-200 border"
+            className="bg-gray-300 hover:bg-gray-200 text-2xl font-semibold"
             onClick={() => {
               setSocketCount(sockets.length + 1);
             }}
@@ -225,7 +225,7 @@ const InOutLane: React.FC<{
           </button>
           <button
             aria-label="remove a socket"
-            className="p-2 bg-white hover:bg-gray-200 border"
+            className="bg-gray-300 hover:bg-gray-200 text-2xl font-semibold"
             onClick={() => {
               if (sockets.length > 1) {
                 setSocketCount(sockets.length - 1);
