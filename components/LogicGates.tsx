@@ -2,8 +2,7 @@ import _ from "lodash";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Draggable from "react-draggable";
 import clsx from "clsx";
-
-import { useLocalStorage } from "react-use";
+import { useIsomorphicLayoutEffect } from "react-use";
 
 type Binary = 0 | 1;
 
@@ -17,6 +16,7 @@ type GateType = {
   inputs: number;
   outputs: number;
   logic: TruthTable;
+  cannotDelete?: true;
 };
 
 type Wire = {
@@ -33,24 +33,66 @@ type Gate = {
   type: GateTypeKey;
 };
 
+const getColor = (hue = _.random(0, 360)) => `hsl(${hue}, 90%, 30%)`;
+
 const DEFAULT_GATE_TYPES: GateType[] = [
   {
-    id: -2,
+    id: -1,
     name: "AND",
-    color: `hsl(${147}, 90%, 30%)`,
+    color: getColor(147),
     inputs: 2,
     outputs: 1,
     logic: [[0], [0], [0], [1]],
+    cannotDelete: true,
   },
   {
-    id: -1,
+    id: -2,
     name: "NOT",
-    color: `hsl(${0}, 90%, 30%)`,
+    color: getColor(0),
     inputs: 1,
     outputs: 1,
     logic: [[1], [0]],
+    cannotDelete: true,
   },
 ];
+
+const EXTRA_GATE_TYPES: GateType[] = [
+  {
+    id: -3,
+    name: "OR",
+    color: getColor(),
+    inputs: 2,
+    outputs: 1,
+    logic: [[0], [1], [1], [1]],
+  },
+  {
+    id: -4,
+    name: "XOR",
+    color: getColor(),
+    inputs: 2,
+    outputs: 1,
+    logic: [[0], [1], [1], [0]],
+  },
+];
+
+const useLocalStorage = <V,>(
+  key: string,
+  initValue: V
+): [V, React.Dispatch<React.SetStateAction<V>>] => {
+  const [state, setState] = useState<V>(() => {
+    try {
+      const v = localStorage.getItem(key);
+      if (v != null) return JSON.parse(v) as V;
+    } catch {}
+    return initValue;
+  });
+
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(state));
+  }, [key, state]);
+
+  return [state, setState];
+};
 
 type ConnectWire = (isInput: boolean, gate: Gate | null, index: number) => void;
 
@@ -60,7 +102,7 @@ const LogicGate: React.FC<{
   isSelected?: boolean;
   onSelect: (gate: Gate) => void;
   connectWire: ConnectWire;
-  updatePos: () => void;
+  updatePos: WireUpdater;
 }> = ({ gate, gateType, isSelected, onSelect, connectWire, updatePos }) => {
   const nodes = Math.max(gateType.inputs, gateType.outputs, 1);
 
@@ -68,7 +110,7 @@ const LogicGate: React.FC<{
   return (
     <Draggable
       onDrag={(_evt, _data) => {
-        updatePos();
+        updatePos(gate);
       }}
       nodeRef={nodeRef}
       defaultPosition={{
@@ -86,7 +128,9 @@ const LogicGate: React.FC<{
           }}
           className={clsx(
             "flex items-center justify-center w-20 border-2 rounded select-none cursor-pointer text-white",
-            isSelected ? "border-white" : "border-gray-400"
+            isSelected
+              ? "border-white"
+              : "border-gray-400 hover:border-gray-300"
           )}
         >
           {gateType.name}
@@ -121,7 +165,7 @@ const LogicGate: React.FC<{
         <div className="absolute top-0 -right-6 h-full flex flex-col items-center justify-center space-y-2">
           {Array.from({ length: gateType.outputs }).map((_a, i) => {
             return (
-              <div key={"out" + i}>
+              <div key={"out" + i} className="relative">
                 <div
                   className={clsx(
                     "h-1 w-6 bg-white absolute top-1/2 transform -translate-y-1/2",
@@ -308,9 +352,13 @@ const Line: React.FC<{
   line: { x1: number; y1: number; x2: number; y2: number } | null;
   color?: string;
 }> = ({ line, color = "#ffffff" }) => {
-  // TODO: lines look way to curved when gates are too close
-  // const delta = Math.abs(line.x2 - line.x1);
   if (!line) return null;
+
+  const dist = Math.sqrt(
+    (line.x2 - line.x1) * (line.x2 - line.x1) +
+      (line.y2 - line.y1) * (line.y2 - line.y1)
+  );
+  const bezier = Math.min(dist, 200);
 
   return (
     <svg className="overflow-visible pointer-events-none fixed left-0 top-0">
@@ -318,8 +366,8 @@ const Line: React.FC<{
         strokeWidth="2px"
         stroke={color}
         fill="none"
-        d={`M${line.x1},${line.y1} C${line.x1 + 200},${line.y1} ${
-          line.x2 - 200
+        d={`M${line.x1},${line.y1} C${line.x1 + bezier},${line.y1} ${
+          line.x2 - bezier
         },${line.y2} ${line.x2},${line.y2}`}
       />
     </svg>
@@ -336,10 +384,30 @@ const DrawPendingWire: React.FC<{ pendingWire: PendingWire | null }> = ({
   ) : null;
 };
 
-const DrawWire: React.FC<{ wire: Wire }> = ({ wire }) => {
+type WireUpdater = (gate?: Gate) => void;
+
+const DrawWire: React.FC<{
+  wire: Wire;
+  updateRef: React.MutableRefObject<WireUpdater[]>;
+}> = ({ wire, updateRef }) => {
+  const [line, setLine] = useState(() => getWirePos(wire));
+
+  useIsomorphicLayoutEffect(() => {
+    const onUpdate: WireUpdater = (gate) => {
+      if (!gate || wire.to === gate || wire.from === gate) {
+        setLine(getWirePos(wire));
+      }
+    };
+    const arr = updateRef.current;
+    updateRef.current.push(onUpdate);
+    return () => {
+      _.pull(arr, onUpdate);
+    };
+  }, []);
+
   return (
     <Line
-      line={getWirePos(wire)}
+      line={line}
       color={
         wire.isOn === 0 ? "#ff0000" : wire.isOn === 1 ? "#00ff00" : "#ffffff"
       }
@@ -354,7 +422,7 @@ const calcOutput = (
   wires: Wire[],
   modifyWires: boolean
 ): (Binary | null)[] => {
-  // const gateMap = new WeakMap<Gate, Binary[]>();
+  const gateMap = new WeakMap<Gate, Binary[]>();
 
   wires = [...wires];
 
@@ -377,8 +445,12 @@ const calcOutput = (
       return inputSockets[index];
     }
 
-    // const cached = gateMap.get(gate);
-    // if (cached) return cached[index];
+    const cached = gateMap.get(gate);
+    if (cached) {
+      if (modifyWires) wire.isOn = cached[index];
+
+      return cached[index];
+    }
 
     const gateType = gateTypeMap[gate.type];
     if (!gateType) return null; // abort!
@@ -396,7 +468,9 @@ const calcOutput = (
     if (failed) return null;
 
     const outputs = gateType.logic[inputAsIndex];
-    // gateMap.set(gate, outputs);
+    if (!outputs) return null;
+
+    gateMap.set(gate, outputs);
 
     if (modifyWires) wire.isOn = outputs[index];
 
@@ -416,7 +490,7 @@ const getTruthTable = (
 ) => {
   const table: TruthTable = [];
 
-  const c = inputCount ** 2;
+  const c = Math.max(2, inputCount ** 2);
   for (let n = 0; n < c; n++) {
     const inputSockets: Binary[] = Array.from({ length: inputCount }).map(
       (_a, i) => ((n & (1 << i)) === 0 ? 0 : 1)
@@ -444,7 +518,7 @@ export const LogicGates = () => {
 
   const [customGateTypes, setCustomGateTypes] = useLocalStorage<GateType[]>(
     "gate_types",
-    []
+    EXTRA_GATE_TYPES
   );
   const [gates, setGates] = useState<Gate[]>([]);
   const [wires, setWires] = useState<Wire[]>([]);
@@ -515,6 +589,11 @@ export const LogicGates = () => {
     clearGates();
   };
 
+  const removeGateType = (type: GateTypeKey) => {
+    clearGates();
+    setCustomGateTypes((prev) => (prev || []).filter((gt) => gt.id !== type));
+  };
+
   const connectWire: ConnectWire = (isInput, gate, index) => {
     setSelectedGate(null);
 
@@ -544,11 +623,13 @@ export const LogicGates = () => {
     }
   };
 
-  // TODO: this is a hack to rerender <Wire/> components when we drag gates around
-  const [, update] = useState(false);
-  const updatePos = () => {
-    update((f) => !f);
+  const wireUpdateRef = useRef<WireUpdater[]>([]);
+  const updatePos: WireUpdater = (...args) => {
+    for (const w of wireUpdateRef.current) w(...args);
   };
+  useIsomorphicLayoutEffect(() => {
+    updatePos();
+  }, [inputSockets, outputSocketCount]);
 
   return (
     <>
@@ -568,13 +649,23 @@ export const LogicGates = () => {
 
         {gateTypes.map((gt) => {
           return (
-            <button
-              key={gt.id}
-              className="p-2 border bg-gray-200 hover:bg-gray-400"
-              onClick={() => addGate(gt.id)}
-            >
-              + {gt.name}
-            </button>
+            <div key={gt.id} className="relative">
+              <button
+                className="p-2 border bg-gray-200 hover:bg-gray-300"
+                onClick={() => addGate(gt.id)}
+              >
+                + {gt.name}
+              </button>
+
+              {!gt.cannotDelete && (
+                <button
+                  className="absolute top-0 right-0 transform translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-gray-400 hover:bg-gray-500 text-xs text-white leading-none flex items-center justify-center"
+                  onClick={() => removeGateType(gt.id)}
+                >
+                  X
+                </button>
+              )}
+            </div>
           );
         })}
 
@@ -611,10 +702,18 @@ export const LogicGates = () => {
             });
           }}
           setSocketCount={(count) => {
+            const delta = count - inputSockets.length;
             setWires((prev) =>
-              prev.filter((w) => w.from !== null && w.to !== null)
+              prev.filter((w) => !(w.from === null && w.fromOutput >= count))
             );
-            setInputSockets(Array.from({ length: count }).map(() => 0));
+            setInputSockets(
+              delta > 0
+                ? [
+                    ...inputSockets,
+                    ...Array.from({ length: delta }).map(() => 0 as Binary),
+                  ]
+                : inputSockets.slice(0, count)
+            );
           }}
           connectWire={connectWire}
         />
@@ -624,7 +723,7 @@ export const LogicGates = () => {
           sockets={outputSockets}
           setSocketCount={(count) => {
             setWires((prev) =>
-              prev.filter((w) => w.from !== null && w.to !== null)
+              prev.filter((w) => !(w.to === null && w.toInput >= count))
             );
             setOutputSocketCount(count);
           }}
@@ -646,7 +745,9 @@ export const LogicGates = () => {
         })}
 
         {wires.map((wire) => {
-          return <DrawWire key={wire.id} wire={wire} />;
+          return (
+            <DrawWire key={wire.id} wire={wire} updateRef={wireUpdateRef} />
+          );
         })}
 
         <DrawPendingWire pendingWire={pendingWire} />
