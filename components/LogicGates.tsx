@@ -2,7 +2,12 @@ import _ from "lodash";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Draggable from "react-draggable";
 import clsx from "clsx";
-import { useIsomorphicLayoutEffect, useKeyPressEvent } from "react-use";
+import {
+  useEvent,
+  useIsomorphicLayoutEffect,
+  useKeyPress,
+  useKeyPressEvent,
+} from "react-use";
 
 type Binary = 0 | 1;
 
@@ -120,6 +125,7 @@ const LogicGate: React.FC<{
     >
       <div ref={nodeRef} className="absolute z-10 inline-flex">
         <button
+          data-gate-id={gate.id}
           onClick={() => onSelect(gate)}
           aria-selected={isSelected}
           style={{
@@ -130,7 +136,7 @@ const LogicGate: React.FC<{
             "flex items-center justify-center w-20 border-2 rounded select-none cursor-pointer text-white",
             isSelected
               ? "border-white"
-              : "border-gray-400 hover:border-gray-300"
+              : "border-gray-500 hover:border-gray-400"
           )}
           aria-label={`select ${gateType.name} gate ${gate.id}`}
         >
@@ -289,6 +295,58 @@ const InOutLane: React.FC<{
   );
 };
 
+type BoxBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type BoxSelectionStart = {
+  x: number;
+  y: number;
+  parentX: number;
+  parentY: number;
+};
+
+const BoxSelection: React.FC<{
+  start: BoxSelectionStart;
+  onFinish: (box: BoxBounds | null) => void;
+}> = ({ start, onFinish }) => {
+  const mousePos = useMousePos();
+
+  const mx = mousePos.x - start.parentX,
+    my = mousePos.y - start.parentY;
+
+  const x = Math.min(start.x, mx),
+    y = Math.min(start.y, my),
+    width = Math.abs(mx - start.x),
+    height = Math.abs(my - start.y);
+
+  useEvent("mouseup", () => {
+    if (mousePos.x === 0 && mousePos.y === 0) {
+      onFinish(null);
+    } else {
+      onFinish({ x: start.parentX + x, y: start.parentY + y, width, height });
+    }
+  });
+
+  if (mousePos.x === 0 && mousePos.y === 0) return null;
+
+  return (
+    <div
+      className="absolute bg-white opacity-25"
+      aria-hidden
+      style={{
+        left: x,
+        top: y,
+        width,
+        height,
+      }}
+    />
+  );
+};
+
 const getWirePos = (wire: Wire) => {
   const fromEl = document.querySelector(
     `[data-gate-id="${wire.from?.id ?? ""}"][data-gate-index="${
@@ -379,14 +437,34 @@ const Line: React.FC<{
   );
 };
 
-const DrawPendingWire: React.FC<{ pendingWire: PendingWire | null }> = ({
+const DrawPendingWire: React.FC<{ pendingWire: PendingWire }> = ({
   pendingWire,
 }) => {
   const mousePos = useMousePos();
+  if (mousePos.x === 0 && mousePos.y === 0) return null;
 
-  return pendingWire ? (
-    <Line line={getPendingWirePos(pendingWire, mousePos.x, mousePos.y)} />
-  ) : null;
+  return <Line line={getPendingWirePos(pendingWire, mousePos.x, mousePos.y)} />;
+};
+
+const getGateBounds = (gate: Gate): BoxBounds => {
+  const el = document.querySelector(
+    `[data-gate-id="${gate.id}"]:not([data-gate-dir])`
+  );
+
+  if (!el) throw new Error(`Missing gate: ${gate.id}`);
+
+  const b = el.getBoundingClientRect();
+
+  return { x: b.x, y: b.y, width: b.width, height: b.height };
+};
+
+const boxesIntersect = (a: BoxBounds, b: BoxBounds): boolean => {
+  return !(
+    a.y + a.height < b.y ||
+    b.y + b.height < a.y ||
+    a.x + a.width < b.x ||
+    b.x + b.width < a.x
+  );
 };
 
 type WireUpdater = (gate?: Gate) => void;
@@ -528,7 +606,7 @@ export const LogicGates = () => {
   const [gates, setGates] = useState<Gate[]>([]);
   const [wires, setWires] = useState<Wire[]>([]);
 
-  const [selectedGate, setSelectedGate] = useState<Gate | null>(null);
+  const [selectedGates, setSelectedGates] = useState<Gate[]>([]);
   const [pendingWire, setPendingWire] = useState<PendingWire | null>(null);
 
   const gateTypes = useMemo(
@@ -544,7 +622,7 @@ export const LogicGates = () => {
     setWires([]);
     setGates([]);
     setPendingWire(null);
-    setSelectedGate(null);
+    setSelectedGates([]);
   };
 
   const idCounter = useRef(Math.max(...gateTypes.map((gt) => gt.id)) + 1);
@@ -558,15 +636,21 @@ export const LogicGates = () => {
       type,
     };
     setGates((prev) => [...prev, gate]);
-    setSelectedGate(gate);
+    setSelectedGates([gate]);
     setPendingWire(null);
   };
 
-  const deleteGate = (gate: Gate) => {
-    setSelectedGate(null);
+  const deleteGates = (toDelete: Gate[]) => {
+    setSelectedGates([]);
     setPendingWire(null);
-    setGates((prev) => _.without(prev, gate));
-    setWires((prev) => prev.filter((w) => w.from !== gate && w.to !== gate));
+    setGates((prev) => _.without(prev, ...toDelete));
+    setWires((prev) =>
+      prev.filter(
+        (w) =>
+          (!w.from || !toDelete.includes(w.from)) &&
+          (!w.to || !toDelete.includes(w.to))
+      )
+    );
   };
 
   const genGateType = () => {
@@ -600,7 +684,7 @@ export const LogicGates = () => {
   };
 
   const connectWire: ConnectWire = (isInput, gate, index) => {
-    setSelectedGate(null);
+    setSelectedGates([]);
 
     if (!isInput) {
       setPendingWire({
@@ -628,6 +712,11 @@ export const LogicGates = () => {
     }
   };
 
+  const [isShiftPressed] = useKeyPress("Shift");
+
+  const [boxSelectionStart, setBoxSelectionStart] =
+    useState<BoxSelectionStart | null>(null);
+
   const wireUpdateRef = useRef<WireUpdater[]>([]);
   const updatePos: WireUpdater = (...args) => {
     for (const w of wireUpdateRef.current) w(...args);
@@ -637,9 +726,17 @@ export const LogicGates = () => {
   }, [inputSockets, outputSocketCount]);
 
   useKeyPressEvent("Escape", () => {
-    setSelectedGate(null);
+    setSelectedGates([]);
     setPendingWire(null);
   });
+  useKeyPressEvent("Delete", () => {
+    if (selectedGates.length) deleteGates(selectedGates);
+  });
+
+  useEvent(
+    "resize",
+    useMemo(() => _.throttle(() => updatePos(), 200), [])
+  );
 
   return (
     <>
@@ -679,12 +776,12 @@ export const LogicGates = () => {
           );
         })}
 
-        {selectedGate ? (
+        {selectedGates.length ? (
           <>
             <div className="flex flex-col items-stretch flex-1" />
             <button
               className="p-2 border bg-red-300 hover:bg-red-500"
-              onClick={() => deleteGate(selectedGate)}
+              onClick={() => deleteGates(selectedGates)}
             >
               Delete
             </button>
@@ -694,10 +791,20 @@ export const LogicGates = () => {
 
       <div
         className="relative bg-gray-800 flex-1 overflow-hidden"
-        onClick={(e) => {
+        onMouseDown={(e) => {
           if (e.target === e.currentTarget) {
-            setSelectedGate(null);
             setPendingWire(null);
+
+            const elBounds = (
+              e.target as HTMLDivElement
+            ).getBoundingClientRect();
+
+            setBoxSelectionStart({
+              parentX: elBounds.x,
+              parentY: elBounds.y,
+              x: e.pageX - elBounds.x,
+              y: e.pageY - elBounds.y,
+            });
           }
         }}
       >
@@ -740,14 +847,43 @@ export const LogicGates = () => {
           connectWire={connectWire}
         />
 
+        {boxSelectionStart && (
+          <BoxSelection
+            start={boxSelectionStart}
+            onFinish={(box) => {
+              const intersecting = box
+                ? gates.filter((gate) =>
+                    boxesIntersect(box, getGateBounds(gate))
+                  )
+                : [];
+
+              setSelectedGates(
+                isShiftPressed
+                  ? (prev) => _.union(prev, intersecting)
+                  : intersecting
+              );
+              setBoxSelectionStart(null);
+            }}
+          />
+        )}
+
         {gates.map((gate) => {
           return (
             <LogicGate
               key={gate.id}
               gate={gate}
               gateType={gateTypes.find((gt) => gt.id === gate.type)!}
-              isSelected={selectedGate === gate}
-              onSelect={setSelectedGate}
+              isSelected={selectedGates.includes(gate)}
+              onSelect={() => {
+                setSelectedGates(
+                  isShiftPressed
+                    ? (prev) =>
+                        prev.includes(gate)
+                          ? _.without(prev, gate)
+                          : [...prev, gate]
+                    : [gate]
+                );
+              }}
               connectWire={connectWire}
               updatePos={updatePos}
             />
@@ -760,7 +896,7 @@ export const LogicGates = () => {
           );
         })}
 
-        <DrawPendingWire pendingWire={pendingWire} />
+        {pendingWire && <DrawPendingWire pendingWire={pendingWire} />}
       </div>
     </>
   );
