@@ -2,7 +2,7 @@ import _ from "lodash";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Draggable from "react-draggable";
 import clsx from "clsx";
-import { useIsomorphicLayoutEffect } from "react-use";
+import { useIsomorphicLayoutEffect, useKeyPressEvent } from "react-use";
 
 type Binary = 0 | 1;
 
@@ -119,7 +119,7 @@ const LogicGate: React.FC<{
       }}
     >
       <div ref={nodeRef} className="absolute z-10 inline-flex">
-        <div
+        <button
           onClick={() => onSelect(gate)}
           aria-selected={isSelected}
           style={{
@@ -134,7 +134,7 @@ const LogicGate: React.FC<{
           )}
         >
           {gateType.name}
-        </div>
+        </button>
 
         <div className="absolute top-0 -left-6 h-full flex flex-col items-center justify-center space-y-2">
           {Array.from({ length: gateType.inputs }).map((_a, i) => {
@@ -147,14 +147,14 @@ const LogicGate: React.FC<{
                   )}
                 />
 
-                <div
+                <button
                   data-gate-id={gate.id}
                   data-gate-dir="in"
                   data-gate-index={i}
-                  aria-label="attach input wire"
+                  aria-label={`attach input wire to ${gateType.name} gate ${gate.id}`}
                   onClick={() => connectWire(true, gate, i)}
                   className={clsx(
-                    "relative w-4 h-4 rounded-full cursor-pointer bg-gray-400 hover:bg-gray-600"
+                    "block relative w-4 h-4 rounded-full cursor-pointer bg-gray-400 hover:bg-gray-600"
                   )}
                 />
               </div>
@@ -173,14 +173,14 @@ const LogicGate: React.FC<{
                   )}
                 />
 
-                <div
+                <button
                   data-gate-id={gate.id}
                   data-gate-dir="out"
                   data-gate-index={i}
-                  aria-label="attach output wire"
+                  aria-label={`attach output wire to ${gateType.name} gate ${gate.id}`}
                   onClick={() => connectWire(false, gate, i)}
                   className={clsx(
-                    "relative w-4 h-4 rounded-full cursor-pointer bg-gray-400 hover:bg-gray-600"
+                    "block relative w-4 h-4 rounded-full cursor-pointer bg-gray-400 hover:bg-gray-600"
                   )}
                 />
               </div>
@@ -207,6 +207,8 @@ const InOutLane: React.FC<{
   setSocketCount,
   connectWire,
 }) => {
+  const dirLabel = dir === -1 ? "input" : "output";
+
   return (
     <>
       <div
@@ -216,6 +218,8 @@ const InOutLane: React.FC<{
         )}
       >
         {sockets.map((value, i) => {
+          const socketLabel = `${dirLabel} bit ${i + 1}`;
+
           return (
             <div key={i} className="relative">
               <div
@@ -227,7 +231,7 @@ const InOutLane: React.FC<{
 
               <button
                 disabled={disabled}
-                aria-label="toggle bit"
+                aria-label={`toggle ${socketLabel}`}
                 onClick={() => {
                   setSocketValue?.(i, value === 0 ? 1 : 0);
                 }}
@@ -242,14 +246,14 @@ const InOutLane: React.FC<{
                 )}
               />
 
-              <div
+              <button
                 data-gate-id=""
                 data-gate-dir={dir === -1 ? "in" : "out"}
                 data-gate-index={i}
-                aria-label="attach wire"
+                aria-label={`attach wire to ${socketLabel}`}
                 onClick={() => connectWire(dir === -1, null, i)}
                 className={clsx(
-                  "z-10 w-4 h-4 rounded-full cursor-pointer bg-gray-400 hover:bg-gray-600 absolute top-1/2 transform -translate-y-1/2",
+                  "block z-10 w-4 h-4 rounded-full cursor-pointer bg-gray-400 hover:bg-gray-600 absolute top-1/2 transform -translate-y-1/2",
                   dir === -1 ? "right-10" : "left-10"
                 )}
               />
@@ -259,7 +263,7 @@ const InOutLane: React.FC<{
 
         <div className="absolute bottom-0 left-0 w-full flex flex-col items-stretch p-1 space-y-1">
           <button
-            aria-label="add a socket"
+            aria-label={`add an ${dirLabel} socket`}
             className="bg-gray-300 hover:bg-gray-200 text-2xl font-semibold"
             onClick={() => {
               setSocketCount(sockets.length + 1);
@@ -268,7 +272,7 @@ const InOutLane: React.FC<{
             +
           </button>
           <button
-            aria-label="remove a socket"
+            aria-label={`remove an ${dirLabel} socket`}
             className="bg-gray-300 hover:bg-gray-200 text-2xl font-semibold"
             onClick={() => {
               if (sockets.length > 1) {
@@ -630,6 +634,11 @@ export const LogicGates = () => {
   useIsomorphicLayoutEffect(() => {
     updatePos();
   }, [inputSockets, outputSocketCount]);
+
+  useKeyPressEvent("Escape", () => {
+    setSelectedGate(null);
+    setPendingWire(null);
+  });
 
   return (
     <>
