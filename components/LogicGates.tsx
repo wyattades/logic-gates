@@ -132,6 +132,7 @@ const LogicGate: React.FC<{
               ? "border-white"
               : "border-gray-400 hover:border-gray-300"
           )}
+          aria-label={`select ${gateType.name} gate ${gate.id}`}
         >
           {gateType.name}
         </button>
