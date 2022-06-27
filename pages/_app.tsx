@@ -19,7 +19,7 @@ export default function App({ Component, pageProps }: AppProps) {
       {process.env.NODE_ENV === "production" && (
         <Script
           data-website-id="4df3a72a-387e-4526-ab91-2a83c23aceeb"
-          src="https://sip-umami.vercel.app/umami.js"
+          src="https://sip-umami.vercel.app/sip.js"
         />
       )}
       <Component {...pageProps} />
